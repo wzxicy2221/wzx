@@ -1,6 +1,3 @@
-set -x
-set -e
-
 git status
 
 git add -A
