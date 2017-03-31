@@ -5,6 +5,6 @@ git status
 
 git add -A
 
-git commit -m "comment"
+git commit -m "$0"
 
 git push
