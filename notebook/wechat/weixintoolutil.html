@@ -1,0 +1,427 @@
+<html>
+<head>
+  <title>weixintoolutil</title>
+  <basefont face="微软雅黑" size="2" />
+  <meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
+  <meta name="exporter-version" content="Evernote Windows/304720 (zh-CN, DDL); Windows/10.0.14393 (Win64);"/>
+  <style>
+    body, td {
+      font-family: 微软雅黑;
+      font-size: 10pt;
+    }
+  </style>
+</head>
+<body>
+<a name="306"/>
+<h1>weixintoolutil</h1>
+
+<div>
+<span><span style="word-wrap: break-word; -webkit-nbsp-mode: space; -webkit-line-break: after-white-space;">/**<br/>
+*<br/>
+*/<br/>
+package com.ucmed.common.weixin;<br/>
+import java.io.BufferedReader;<br/>
+import java.io.IOException;<br/>
+import java.io.InputStreamReader;<br/>
+import java.io.PrintWriter;<br/>
+import java.io.UnsupportedEncodingException;<br/>
+import java.net.URL;<br/>
+import java.net.URLConnection;<br/>
+import java.security.MessageDigest;<br/>
+import java.security.NoSuchAlgorithmException;<br/>
+import java.util.Formatter;<br/>
+import java.util.HashMap;<br/>
+import java.util.Map;<br/>
+import java.util.UUID;<br/><br/>
+import javax.servlet.http.HttpServletRequest;<br/><br/>
+import net.sf.json.JSONObject;<br/><br/>
+import org.apache.log4j.Logger;<br/>
+import org.jpxx.commons.cache.CacheManager;<br/>
+import org.springframework.ui.ModelMap;<br/><br/>
+import com.ucmed.common.util.Constants;<br/><br/>
+/**<br/>
+* @author Gerrard<br/>
+* @date 2015年3月20日<br/>
+*/<br/>
+public class WeiXinToolUtil {<br/>
+     private static final Logger LOG=Logger.getLogger(WeiXinToolUtil.class);<br/>
+    <br/>
+     /**微信客户端发送https://open.weixin.qq.com/connect/oauth2/authorize?appid=APPID&amp;redirect_uri=REDIRECT_URI&amp;response_type=code&amp;scope=snsapi_base&amp;state=123#wechat_redirect<br/>
+     * REDIRECT_URI回调地址为当前需展示界面<br/>
+     *获取openid<br/>
+     * @param request<br/>
+     * @param appid<br/>
+     * @param appsecret<br/>
+     * @return<br/>
+     */<br/>
+     public static String getOpenId(HttpServletRequest request,String appid,String appsecret){<br/>
+          String code=request.getParameter(&quot;code&quot;);<br/>
+          String grant_type=&quot;authorization_code&quot;;<br/>
+          String url=&quot;https://api.weixin.qq.com/sns/oauth2/access_token?appid=&quot;+appid<br/>
+                    +&quot;&amp;secret=&quot;+appsecret+&quot;&amp;code=&quot;+code+&quot;&amp;grant_type=&quot;+grant_type;<br/>
+          String str=sendGet(url);<br/>
+          JSONObject reslut=JSONObject.fromObject(str);<br/>
+          String openid=reslut.optString(&quot;openid&quot;);<br/>
+          LOG.info(&quot;openid=&quot; + openid);<br/>
+          return openid;<br/>
+     }<br/>
+    <br/>
+     /**<br/>
+     * 获取access_token 调用微信接口凭证 时效7200秒 ACCESS_TOKEN_TIME=90*60<br/>
+     * @param appID<br/>
+     * @param appsecret<br/>
+     * @param cacheManager<br/>
+     * @return<br/>
+     */<br/>
+     public static String getAccessTokenByRequest(String appID,String appsecret,CacheManager cacheManager){<br/>
+          String accessToken = &quot;&quot;;<br/>
+          String grant_type = &quot;client_credential&quot;;<br/>
+          String url=&quot;https://api.weixin.qq.com/cgi-bin/token?grant_type=&quot;+grant_type+&quot;&amp;appid=&quot;+appID+&quot;&amp;secret=&quot;+appsecret;<br/>
+          String str=sendGet(url);<br/>
+          JSONObject reslut=JSONObject.fromObject(str);<br/>
+          accessToken=reslut.optString(&quot;access_token&quot;);<br/>
+          cacheManager.put(&quot;access_token&quot;, accessToken, Constants.ACCESS_TOKEN_TIME);<br/>
+          return accessToken;<br/>
+     }<br/>
+     /**<br/>
+       * 判断access_token是否失效，失效则重新获取<br/>
+       * @param cacheManager<br/>
+       * @return<br/>
+       */<br/>
+     public static String getAccessToken(String appid,String appsecret,CacheManager cacheManager){<br/>
+          String accessToken = (String) cacheManager.get(&quot;access_token&quot;);<br/>
+               if (null == accessToken || &quot;&quot;.equals(accessToken)) {<br/>
+                    accessToken = getAccessTokenByRequest(appid,<br/>
+                              appsecret, cacheManager);<br/>
+               }<br/>
+               LOG.info(&quot;access_token=&quot; + accessToken);<br/>
+          return accessToken;<br/>
+         <br/>
+     }<br/>
+    <br/>
+     /**<br/>
+          * 获取用户基本信息并判断是否关注<br/>
+          * @param accessToken<br/>
+          * @param openid<br/>
+          * @return Map&lt;String, String&gt; <br/>
+          * subscribe 0:未关注 1:已关注  若subscribe为0 则获取不到其他信息<br/>
+          * 返回错误时reslut.optString(&quot;subscribe&quot;)为&quot;&quot;;<br/>
+          */<br/>
+          public static Map&lt;String, String&gt; getSubscribe(String accessToken,String openid){<br/>
+               String url=&quot;https://api.weixin.qq.com/cgi-bin/user/info?access_token=&quot;+accessToken+&quot;&amp;openid=&quot;+openid+&quot;&amp;lang=zh_CN&quot;;<br/>
+               String str=sendGet(url);<br/>
+               JSONObject reslut=JSONObject.fromObject(str);<br/>
+               String subscribe=reslut.optString(&quot;subscribe&quot;);//判断关注与否<br/>
+               String nickname =reslut.optString(&quot;nickname&quot;);//用户昵称<br/>
+               String headimgurl=reslut.optString(&quot;headimgurl&quot;);//用户头像<br/>
+               Map&lt;String, String&gt; map =new HashMap&lt;String, String&gt;();<br/>
+               map.put(&quot;subscribe&quot;, subscribe);<br/>
+               map.put(&quot;nickname&quot;, nickname);<br/>
+               map.put(&quot;headimgurl&quot;, headimgurl);<br/>
+               return map;<br/>
+          }<br/>
+         <br/>
+          /**<br/>
+          * 获取jsapi_ticket 调用JSSDK接口凭证 时效 7200秒<br/>
+          * @return<br/>
+          */<br/>
+          private static String getTicket(String appid,String appsecret,CacheManager cacheManager){<br/>
+               String accessToken=getAccessToken(appid,appsecret,cacheManager);<br/>
+               String url=&quot;https://api.weixin.qq.com/cgi-bin/ticket/getticket?access_token=&quot;+accessToken+&quot;&amp;type=jsapi&quot;;<br/>
+               String str=sendGet(url);<br/>
+               JSONObject reslut=JSONObject.fromObject(str);<br/>
+               String ticket =reslut.optString(&quot;ticket&quot;);<br/>
+               cacheManager.put(&quot;jsapi_ticket&quot;, ticket, Constants.ACCESS_TOKEN_TIME);<br/>
+               return ticket;<br/>
+          }<br/>
+         <br/>
+          /**<br/>
+          * 获取 appid公众号ID timestamp时间戳 noncestr随机字符串 signature签名<br/>
+          * @param URL 当前网页的URL，不包含#及其后面部分<br/>
+          * 签名生成规则如下：参与签名的字段包括noncestr（随机字符串）,<br/>
+          * 有效的jsapi_ticket, timestamp（时间戳）,<br/>
+          * url（当前网页的URL，不包含#及其后面部分） 。<br/>
+          * 对所有待签名参数按照字段名的ASCII 码从小到大排序（字典序）后，<br/>
+          * 使用URL键值对的格式（即key1=value1&amp;key2=value2…）拼接成字符串string1。<br/>
+          * 这里需要注意的是所有参数名均为小写字符。对string1作sha1加密，字段名和字段值都采用原始值，不进行URL 转义。<br/>
+          */<br/>
+          public static Map&lt;String,String&gt; getSignature(String URL,String appid,String appsecret,CacheManager cacheManager){<br/>
+               Map&lt;String,String&gt; map=new HashMap&lt;String,String&gt;();<br/>
+               String timestamp = getTimestamp();<br/>
+               String noncestr = getNoncestr();<br/>
+               String ticket=(String) cacheManager.get(&quot;jsapi_ticket&quot;);<br/>
+               if(null==ticket||&quot;&quot;.equals(ticket)){<br/>
+                    ticket = getTicket(appid,appsecret,cacheManager);<br/>
+                    LOG.info(&quot;jsapi_ticket1=&quot;+ticket);<br/>
+               }<br/>
+               //对所有待签名参数按照字段名的ASCII 码从小到大排序（字典序）后，使用URL键值对的格式（即key1=value1&amp;key2=value2…）拼接成字符串<br/>
+               String s=&quot;jsapi_ticket=&quot;+ticket+&quot;&amp;noncestr=&quot;+noncestr+&quot;&amp;timestamp=&quot;+timestamp+&quot;&amp;url=&quot;+URL;<br/>
+               String signature=&quot;&quot;;<br/>
+               signature=getSha1(s);<br/>
+               map.put(&quot;appid&quot;, appid);<br/>
+               map.put(&quot;timestamp&quot;,timestamp);<br/>
+               map.put(&quot;noncestr&quot;,noncestr);<br/>
+               map.put(&quot;signature&quot;,signature);<br/>
+               return map;    <br/>
+          }<br/>
+          /**<br/>
+          * JSSDK<br/>
+          * @param request<br/>
+          * @param appid<br/>
+          * @param appsecret<br/>
+          * @param cacheManager<br/>
+          * @param map<br/>
+          */<br/>
+          public static void getSignature(HttpServletRequest request,String appid,String appsecret,CacheManager cacheManager,ModelMap map){<br/>
+               //签名URL<br/>
+               String url=getBackUrl(request);<br/>
+               LOG.info(&quot;uuuuu===&quot;+url);<br/>
+               Map&lt;String,String&gt; signatureMap= getSignature(url,appid,appsecret, cacheManager);<br/>
+               map.put(&quot;appid&quot;, signatureMap.get(&quot;appid&quot;));<br/>
+               map.put(&quot;timestamp&quot;,signatureMap.get(&quot;timestamp&quot;));<br/>
+               map.put(&quot;noncestr&quot;,signatureMap.get(&quot;noncestr&quot;));<br/>
+               map.put(&quot;signature&quot;,signatureMap.get(&quot;signature&quot;));<br/>
+          }<br/>
+         <br/>
+          /**<br/>
+          * 对字符串作sha1加密<br/>
+          * @param str<br/>
+          * @return<br/>
+          */<br/>
+          private static String getSha1(String str){<br/>
+               String signature=&quot;&quot;;<br/>
+               try {<br/>
+                    MessageDigest messageDigest=MessageDigest.getInstance(&quot;SHA-1&quot;);<br/>
+                    messageDigest.reset();<br/>
+                    messageDigest.update(str.getBytes(&quot;UTF-8&quot;));<br/>
+                    signature=byteToHex(messageDigest.digest());<br/>
+               } catch (NoSuchAlgorithmException e) {<br/>
+                    LOG.error(e);<br/>
+               } catch (UnsupportedEncodingException e) {<br/>
+                    LOG.error(e);<br/>
+               }<br/>
+               return signature;<br/>
+          }<br/><br/>
+          /**<br/>
+          * byte to String<br/>
+          * @param hash<br/>
+          * @return<br/>
+          */<br/>
+          private static String byteToHex(final byte[] hash) {<br/>
+             Formatter formatter = new Formatter();<br/>
+             for (byte b : hash)<br/>
+             {<br/>
+                 formatter.format(&quot;%02x&quot;, b);<br/>
+             }<br/>
+             String result = formatter.toString();<br/>
+             formatter.close();<br/>
+             return result;<br/>
+         }<br/><br/>
+          /**<br/>
+          * 生成签名的时间戳<br/>
+          * @return<br/>
+          */<br/>
+          public static String getTimestamp(){<br/>
+               return Long.toString(System.currentTimeMillis() / 1000);<br/>
+          }<br/>
+          /**<br/>
+          * 生成签名的随机串<br/>
+          * @return<br/>
+          */<br/>
+          public static String getNoncestr(){<br/>
+               return UUID.randomUUID().toString();<br/>
+          }<br/>
+         <br/>
+          /**<br/>
+           * 格式化中文字符，防止出现乱码<br/>
+           * @param str<br/>
+           * @return<br/>
+           */<br/>
+          public static  String codeToString(String str) {<br/>
+              String strString = str;<br/>
+              try {<br/>
+                  byte tempB[] = strString.getBytes(&quot;ISO-8859-1&quot;);<br/>
+                  strString = new String(tempB);<br/>
+                  return strString;<br/>
+              } catch (Exception e) {<br/>
+                  return strString;<br/>
+              }<br/>
+          }<br/>
+         <br/>
+          /**<br/>
+           * 获取完整的Url(不包含端口及&amp;后的参数)<br/>
+           * @param request<br/>
+           * @return<br/>
+           * @throws Exception<br/>
+           */<br/>
+          public static String getBackUrl(HttpServletRequest request) {<br/>
+              String url = &quot;&quot;;   <br/>
+              try {<br/>
+                  url = &quot;http://&quot; + request.getServerName() + request.getContextPath() + request.getServletPath() + &quot;?&quot; + codeToString(request.getQueryString());   <br/>
+//                  url = URLEncoder.encode(url,&quot;gbk&quot;);<br/>
+              } catch(Exception e) {<br/>
+                  LOG.error(e);<br/>
+              }<br/>
+              return url;<br/>
+          }<br/>
+         <br/>
+          /**<br/>
+           * get请求<br/>
+           *<br/>
+           */<br/>
+          public static String sendGet(String url) {<br/>
+                 <br/>
+                  String result = &quot;&quot;;<br/>
+                  BufferedReader in = null;<br/>
+                  try {<br/>
+                      String urlNameString = url;<br/>
+                      URL realUrl = new URL(urlNameString);<br/>
+                      // 打开和URL之间的连接<br/>
+                      URLConnection connection = realUrl.openConnection();<br/>
+                      // 设置通用的请求属性<br/>
+                      connection.setRequestProperty(&quot;accept&quot;, &quot;*/*&quot;);<br/>
+                      connection.setRequestProperty(&quot;connection&quot;, &quot;Keep-Alive&quot;);<br/>
+                      connection.setRequestProperty(&quot;user-agent&quot;,<br/>
+                              &quot;Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1;SV1)&quot;);<br/>
+                      // 建立实际的连接<br/>
+                      connection.connect();<br/>
+                      // 获取所有响应头字段<br/>
+//                      Map&lt;String, List&lt;String&gt;&gt; map = connection.getHeaderFields();<br/>
+                      // 遍历所有的响应头字段<br/>
+//                      for (String key : map.keySet()) {<br/>
+//                          System.out.println(key + &quot;---&gt;&quot; + map.get(key));<br/>
+//                      }<br/>
+                      // 定义 BufferedReader输入流来读取URL的响应<br/>
+                      in = new BufferedReader(new InputStreamReader(<br/>
+                              connection.getInputStream()));<br/>
+                      String line;<br/>
+                      while ((line = in.readLine()) != null) {<br/>
+                          result += line;<br/>
+                      }<br/>
+                  } catch (Exception e) {<br/>
+                      System.out.println(&quot;发送GET请求出现异常！&quot; + e);<br/>
+                      e.printStackTrace();<br/>
+                  }<br/>
+                  // 使用finally块来关闭输入流<br/>
+                  finally {<br/>
+                      try {<br/>
+                          if (in != null) {<br/>
+                              in.close();<br/>
+                          }<br/>
+                      } catch (Exception e2) {<br/>
+                          e2.printStackTrace();<br/>
+                      }<br/>
+                  }<br/>
+                  return result;<br/>
+              }<br/>
+          /**<br/>
+           * 向指定 URL 发送POST方法的请求<br/>
+           *<br/>
+           * @param url<br/>
+           *            发送请求的 URL<br/>
+           * @param param<br/>
+           *            请求参数，请求参数应该是 name1=value1&amp;name2=value2 的形式。<br/>
+           * @return 所代表远程资源的响应结果<br/>
+           */<br/>
+          public static String sendPost(String url, String param) {<br/>
+              PrintWriter out = null;<br/>
+              BufferedReader in = null;<br/>
+              String result = &quot;&quot;;<br/>
+              try {<br/>
+                  URL realUrl = new URL(url);<br/>
+                  // 打开和URL之间的连接<br/>
+                  URLConnection conn = realUrl.openConnection();<br/>
+                  // 设置通用的请求属性<br/>
+                  conn.setRequestProperty(&quot;accept&quot;, &quot;*/*&quot;);<br/>
+                  conn.setRequestProperty(&quot;connection&quot;, &quot;Keep-Alive&quot;);<br/>
+                  conn.setRequestProperty(&quot;user-agent&quot;,<br/>
+                          &quot;Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1;SV1)&quot;);<br/>
+                  // 发送POST请求必须设置如下两行<br/>
+                  conn.setDoOutput(true);<br/>
+                  conn.setDoInput(true);<br/>
+                  // 获取URLConnection对象对应的输出流<br/>
+                  out = new PrintWriter(conn.getOutputStream());<br/>
+                  // 发送请求参数<br/>
+                  out.print(param);<br/>
+                  // flush输出流的缓冲<br/>
+                  out.flush();<br/>
+                  // 定义BufferedReader输入流来读取URL的响应<br/>
+                  in = new BufferedReader(<br/>
+                          new InputStreamReader(conn.getInputStream()));<br/>
+                  String line;<br/>
+                  while ((line = in.readLine()) != null) {<br/>
+                      result += line;<br/>
+                  }<br/>
+              } catch (Exception e) {<br/>
+                  System.out.println(&quot;发送 POST 请求出现异常！&quot;+e);<br/>
+                  e.printStackTrace();<br/>
+              }<br/>
+              //使用finally块来关闭输出流、输入流<br/>
+              finally{<br/>
+                  try{<br/>
+                      if(out!=null){<br/>
+                          out.close();<br/>
+                      }<br/>
+                      if(in!=null){<br/>
+                          in.close();<br/>
+                      }<br/>
+                  }<br/>
+                  catch(IOException ex){<br/>
+                      ex.printStackTrace();<br/>
+                  }<br/>
+              }<br/>
+              return result;</span><div>          }</div><div><br/></div><div align="left"><font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>public</b></span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>static</b></span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>final</b></span></font> <font face="Consolas" size="2"><span style="font-size:10pt">String</span></font> <font color="#0000C0" face="Consolas" size="2"><span style="font-size:10pt"><b><i>DOWNLOAD_MEDIA_URL</i></b></span></font> <font face="Consolas" size="2"><span style="font-size:10pt">=</span></font> <font color="#2A00FF" face="Consolas" size="2"><span style="font-size:10pt">&quot;http://file.api.weixin.qq.com/cgi-bin/media/get?access_token=ACCESS_TOKEN&amp;media_id=MEDIA_ID&quot;</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">;</span></font></div><div align="left"><font color="#010101" face="Consolas" size="2"><span style="font-size:10pt"><br/></span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">   </span></font> <font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">/**</span></font></div><div align="left"><font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">     * 从微信服务器下载文件</span></font></div><div align="left"><font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">     *</span></font> <font color="#7F9FBF" face="Consolas" size="2"><span style="font-size:10pt"><b>@author</b></span></font> <font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">Zexin.Wang</span></font></div><div align="left"><font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">     *</span></font> <font color="#7F9FBF" face="Consolas" size="2"><span style="font-size:10pt"><b>@param</b></span></font> <font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">accessToken</span></font></div><div align="left"><font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">     *</span></font> <font color="#7F9FBF" face="Consolas" size="2"><span style="font-size:10pt"><b>@param</b></span></font> <font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">mediaId</span></font></div><div align="left"><font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">     *</span></font> <font color="#7F9FBF" face="Consolas" size="2"><span style="font-size:10pt"><b>@param</b></span></font> <font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">fileSavePath</span></font></div><div align="left"><font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">     *</span></font> <font color="#7F9FBF" face="Consolas" size="2"><span style="font-size:10pt"><b>@return</b></span></font></div><div align="left"><font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">     *</span></font> <font color="#7F9FBF" face="Consolas" size="2"><span style="font-size:10pt"><b>@throws</b></span></font> <font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">IOException</span></font></div><div align="left"><font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">     *</span></font> <font color="#7F9FBF" face="Consolas" size="2"><span style="font-size:10pt"><b>@date</b></span></font> <font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">2015年10月21日 下午7:39:23</span></font></div><div align="left"><font color="#3F5FBF" face="Consolas" size="2"><span style="font-size:10pt">     */</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">   </span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>public</b></span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>static</b></span></font> <font face="Consolas" size="2"><span style="font-size:10pt">String downloadMediaFromWx(String</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">accessToken</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">,</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">            String</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">mediaId</span></font><font face="Consolas" size="2"><span style="font-size:10pt">, String</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">fileSavePath</span></font><font face="Consolas" size="2"><span style="font-size:10pt">)</span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>throws</b></span></font> <font face="Consolas" size="2"><span style="font-size:10pt">IOException {</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>if</b></span></font><font face="Consolas" size="2"><span style="font-size:10pt">(StringUtils.</span><span style="font-size:10pt"><i>isEmpty</i></span><span style="font-size:10pt">(</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">accessToken</span></font><font face="Consolas" size="2"><span style="font-size:10pt">)</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">                || StringUtils.</span> <span style="font-size:10pt"><i>isEmpty</i></span><span style="font-size:10pt">(</span></font><font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">mediaId</span></font><font face="Consolas" size="2"><span style="font-size:10pt">))</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">           </span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>return</b></span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>null</b></span></font> <font face="Consolas" size="2"><span style="font-size:10pt">;</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">        String</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">requestUrl</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">=</span></font> <font color="#0000C0" face="Consolas" size="2"><span style="font-size:10pt"><b><i>DOWNLOAD_MEDIA_URL</i></b></span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">                .replace(</span></font> <font color="#2A00FF" face="Consolas" size="2"><span style="font-size:10pt">&quot;ACCESS_TOKEN&quot;</span></font><font face="Consolas" size="2"><span style="font-size:10pt">,</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">accessToken</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">)</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">                .replace(</span></font> <font color="#2A00FF" face="Consolas" size="2"><span style="font-size:10pt">&quot;MEDIA_ID&quot;</span></font><font face="Consolas" size="2"><span style="font-size:10pt">,</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">mediaId</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">);</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">        URL</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">url</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">=</span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>new</b></span></font> <font face="Consolas" size="2"><span style="font-size:10pt">URL(</span></font><font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">requestUrl</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">);</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">        HttpURLConnection</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">conn</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">= (HttpURLConnection)</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">url</span></font><font face="Consolas" size="2"><span style="font-size:10pt">.openConnection();</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">conn</span></font><font face="Consolas" size="2"><span style="font-size:10pt">.setRequestMethod(</span></font> <font color="#2A00FF" face="Consolas" size="2"><span style="font-size:10pt">&quot;GET&quot;</span></font><font face="Consolas" size="2"><span style="font-size:10pt">);</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">conn</span></font><font face="Consolas" size="2"><span style="font-size:10pt">.setDoInput(</span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>true</b></span></font><font face="Consolas" size="2"><span style="font-size:10pt">);</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">conn</span></font><font face="Consolas" size="2"><span style="font-size:10pt">.setDoOutput(</span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>true</b></span></font><font face="Consolas" size="2"><span style="font-size:10pt">);</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">        InputStream</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">in</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">=</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">conn</span></font><font face="Consolas" size="2"><span style="font-size:10pt">.getInputStream();</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">        File</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">dir</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">=</span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>new</b></span></font> <font face="Consolas" size="2"><span style="font-size:10pt">File(</span></font><font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">fileSavePath</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">);</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>if</b></span></font><font face="Consolas" size="2"><span style="font-size:10pt">(!</span></font><font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">dir</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">.exists()) {</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">           </span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">dir</span></font><font face="Consolas" size="2"><span style="font-size:10pt">.mkdirs();</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">        }</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>if</b></span></font><font face="Consolas" size="2"><span style="font-size:10pt">(!</span></font><font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">fileSavePath</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">.endsWith(</span></font><font color="#2A00FF" face="Consolas" size="2"><span style="font-size:10pt">&quot;/&quot;</span></font><font face="Consolas" size="2"><span style="font-size:10pt">)) {</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">           </span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">fileSavePath</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">+=</span></font> <font color="#2A00FF" face="Consolas" size="2"><span style="font-size:10pt">&quot;/&quot;</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">;</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">        }</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">        String</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">contentDisposition</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">=</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">conn</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">                .getHeaderField(</span></font> <font color="#2A00FF" face="Consolas" size="2"><span style="font-size:10pt">&quot;Content-disposition&quot;</span></font><font face="Consolas" size="2"><span style="font-size:10pt">);</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">        String</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">wxFileName</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">=</span></font> <font color="#2A00FF" face="Consolas" size="2"><span style="font-size:10pt">&quot;&quot;</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">;</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>if</b></span></font><font face="Consolas" size="2"><span style="font-size:10pt">(</span></font><font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">contentDisposition</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">.indexOf(</span></font><font color="#2A00FF" face="Consolas" size="2"><span style="font-size:10pt">&quot;=&quot;</span></font><font face="Consolas" size="2"><span style="font-size:10pt">) != -1) {</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">           </span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">wxFileName</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">=</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">contentDisposition</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">                    .substring(</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">contentDisposition</span></font><font face="Consolas" size="2"><span style="font-size:10pt">.indexOf(</span></font><font color="#2A00FF" face="Consolas" size="2"><span style="font-size:10pt">&quot;=&quot;</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">) + 1)</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">                    .replaceAll(</span></font> <font color="#2A00FF" face="Consolas" size="2"><span style="font-size:10pt">&quot;\&quot;&quot;</span></font><font face="Consolas" size="2"><span style="font-size:10pt">,</span></font> <font color="#2A00FF" face="Consolas" size="2"><span style="font-size:10pt">&quot;&quot;</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">);</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">        }</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">fileSavePath</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">+=</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">wxFileName</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">;</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">        BufferedOutputStream</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">bos</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">=</span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>new</b></span></font> <font face="Consolas" size="2"><span style="font-size:10pt">BufferedOutputStream(</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">               </span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>new</b></span></font> <font face="Consolas" size="2"><span style="font-size:10pt">FileOutputStream(</span></font><font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">fileSavePath</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">));</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>byte</b></span></font><font face="Consolas" size="2"><span style="font-size:10pt">[]</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">data</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">=</span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>new</b></span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>byte</b></span></font><font face="Consolas" size="2"><span style="font-size:10pt">[1024];</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>int</b></span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">len</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">= -1;</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>while</b></span></font><font face="Consolas" size="2"><span style="font-size:10pt">((</span></font><font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">len</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">=</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">in</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">.read(</span></font><font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">data</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">)) != -1) {</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">           </span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">bos</span></font><font face="Consolas" size="2"><span style="font-size:10pt">.write(</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">data</span></font><font face="Consolas" size="2"><span style="font-size:10pt">, 0,</span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">len</span></font><font face="Consolas" size="2"><span style="font-size:10pt">);</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">        }</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">bos</span></font><font face="Consolas" size="2"><span style="font-size:10pt">.close();</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">in</span></font><font face="Consolas" size="2"><span style="font-size:10pt">.close();</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">conn</span></font><font face="Consolas" size="2"><span style="font-size:10pt">.disconnect();</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">       </span></font> <font color="#7F0055" face="Consolas" size="2"><span style="font-size:10pt"><b>return</b></span></font> <font color="#6A3E3E" face="Consolas" size="2"><span style="font-size:10pt">fileSavePath</span></font> <font face="Consolas" size="2"><span style="font-size:10pt">;</span></font></div><div align="left"><font face="Consolas" size="2"><span style="font-size:10pt">    }</span></font></div><span style="word-wrap: break-word; -webkit-nbsp-mode: space; -webkit-line-break: after-white-space;">         <br/>
+         <br/>
+          /**<br/>
+           * 医链:获取签名<br/>
+           * @param request<br/>
+           * @param appid<br/>
+           * @param appsecret<br/>
+           * @param cacheManager<br/>
+           * @param map<br/>
+           */<br/>
+          public static void getYlSignature(HttpServletRequest request,String appid,String appsecret,CacheManager cacheManager,ModelMap map){<br/>
+                    //签名URL for yl<br/>
+                    String url=getYlUrl(request);<br/>
+                    LOG.info(&quot;uuuuuyl===&quot;+url);<br/>
+                    Map&lt;String,String&gt; signatureMap= getSignature(url,appid,appsecret, cacheManager);<br/>
+                    map.put(&quot;appid&quot;, signatureMap.get(&quot;appid&quot;));<br/>
+                    map.put(&quot;timestamp&quot;,signatureMap.get(&quot;timestamp&quot;));<br/>
+                    map.put(&quot;noncestr&quot;,signatureMap.get(&quot;noncestr&quot;));<br/>
+                    map.put(&quot;signature&quot;,signatureMap.get(&quot;signature&quot;));<br/>
+          }<br/>
+          /**<br/>
+           * 医链：获取url<br/>
+           * @param request<br/>
+           * @return<br/>
+           */<br/>
+          public static String getYlUrl(HttpServletRequest request) {<br/>
+              String url = &quot;&quot;;   <br/>
+              try {<br/>
+                  url = Constants.DOMAIN_URL + request.getContextPath() + request.getServletPath() ; <br/>
+                  if(null != codeToString(request.getQueryString())){<br/>
+                       url = url + &quot;?&quot; + codeToString(request.getQueryString());<br/>
+                  }<br/>
+              } catch(Exception e) {<br/>
+                  LOG.error(e);<br/>
+              }<br/>
+              return url;<br/>
+          }<br/>
+         <br/>
+         <br/>
+          /**<br/>
+          * 获取微信号配置信息和签名，图片前缀，域名,放入modelmap<br/>
+          * for yl<br/>
+          * @param map<br/>
+          * @param cacheManager<br/>
+          * @param request<br/>
+          */<br/>
+          public static void setWeixinJsInfo(ModelMap map,CacheManager cacheManager,<br/>
+                    HttpServletRequest request){<br/>
+               getYlSignature(request, Constants.APPID,<br/>
+                         Constants.APPSECRET, cacheManager, map);<br/>
+               map.put(&quot;picPrefixWx&quot;, Constants.PHOTO_URL_PREFIX);<br/>
+               map.put(&quot;domainWx&quot;, Constants.DOMAIN_URL);<br/>
+          }<br/>
+}<br/></span></span>
+</div></body></html> 

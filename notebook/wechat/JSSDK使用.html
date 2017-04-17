@@ -1,0 +1,139 @@
+<html>
+<head>
+  <title>JSSDK使用</title>
+  <basefont face="微软雅黑" size="2" />
+  <meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
+  <meta name="exporter-version" content="Evernote Windows/304720 (zh-CN, DDL); Windows/10.0.14393 (Win64);"/>
+  <style>
+    body, td {
+      font-family: 微软雅黑;
+      font-size: 10pt;
+    }
+  </style>
+</head>
+<body>
+<a name="363"/>
+<h1>JSSDK使用</h1>
+
+<div>
+<span style="word-wrap: break-word; -webkit-nbsp-mode: space; -webkit-line-break: after-white-space;"><div><a href="http://mp.weixin.qq.com/wiki/7/aaa137b55fb2e">http://mp.weixin.qq.com/wiki/7/aaa137b55fb2e</a></div><div><br/></div><div><br/></div><div><br/></div>
+关于JSSDK使用步骤这里不再赘述可参考官方的JS-SDK的说明文档： http://mp.weixin.qq.com/wiki/7/aaa137b55fb2e0456bf8dd9148dd613f.html<br/>
+其核心在于接口注入权限验证配置中的签名算法 (签名规则见官方说明文档附录1):现贴出签名代码如下<br/>
+1：获取access_token （微信公众号调用接口凭证 时效7200秒）放入缓存<br/>
+    public static String getAccessToken(String appID,String appsecret,CacheManager cacheManager){<br/>
+        String accessToken = &quot;&quot;;<br/>
+        String grant_type = &quot;client_credential&quot;;<br/>
+        String url=&quot;https://api.weixin.qq.com/cgi-bin/token?grant_type=&quot;+grant_type+&quot;&amp;appid=&quot;+appID+&quot;&amp;secret=&quot;+appsecret;<br/>
+        String str=WeixinLoginFilter.sendGet(url, &quot;&quot;);<br/>
+        JSONObject reslut=JSONObject.fromObject(str);<br/>
+        accessToken=reslut.optString(&quot;access_token&quot;);<br/>
+        cacheManager.put(&quot;access_token&quot;, accessToken, Constants.ACCESS_TOKEN_TIME);<br/>
+        return accessToken;<br/>
+    }<br/>
+     /**<br/>
+      * 判断access_token是否失效，失效则重新获取<br/>
+      * @param cacheManager<br/>
+      * @return<br/>
+      */<br/>
+     public static String getAccessToken(CacheManager cacheManager){<br/>
+         String accessToken = (String) cacheManager.get(&quot;access_token&quot;);<br/>
+            if (null == accessToken || &quot;&quot;.equals(accessToken)) {<br/>
+                accessToken = getAccessToken(appid,<br/>
+                        appsecret, cacheManager);<br/>
+            }<br/>
+        return accessToken;<br/><br/>
+     }<br/>
+2：利用第一步获取的access_token 获取jsapi_ticket （调用JSSDK接口凭证 时效 7200秒）放入缓存<br/>
+private static String getTicket(CacheManager cacheManager){<br/>
+            String accessToken=getAccessToken(cacheManager);<br/>
+            String url=&quot;https://api.weixin.qq.com/cgi-bin/ticket/getticket?access_token=&quot;+accessToken+&quot;&amp;type=jsapi&quot;;<br/>
+            String str=WeixinLoginFilter.sendGet(url, &quot;&quot;);<br/>
+            JSONObject reslut=JSONObject.fromObject(str);<br/>
+            String ticket =reslut.optString(&quot;ticket&quot;);<br/>
+            cacheManager.put(&quot;jsapi_ticket&quot;, ticket, Constants.ACCESS_TOKEN_TIME);<br/>
+            return ticket;<br/>
+        }<br/>
+3：生成签名：<br/>
+        /**<br/>
+         * 获取 appid公众号ID timestamp时间戳 noncestr随机字符串 signature签名<br/>
+         * @param URL 当前网页的URL，不包含#及其后面部分<br/>
+         * 签名生成规则如下：参与签名的字段包括noncestr（随机字符串）,<br/>
+         * 有效的jsapi_ticket, timestamp（时间戳）,<br/>
+         * 对所有待签名参数按照字段名的ASCII 码从小到大排序（字典序）后，<br/>
+         * 使用URL键值对的格式（即key1=value1&amp;key2=value2…）拼接成字符串string。<br/>
+         * 这里需要注意的是所有参数名均为小写字符。对string作sha1加密，字段名和字段值都采用原始值，不进行URL 转义。<br/>
+         */<br/>
+        public static Map&lt;String,String&gt; getSignature(String URL,CacheManager cacheManager){<br/>
+            Map&lt;String,String&gt; map=new HashMap&lt;String,String&gt;();<br/>
+            String timestamp = getTimestamp();<br/>
+            String noncestr = getNoncestr();<br/>
+            String ticket=(String) cacheManager.get(&quot;jsapi_ticket&quot;);<br/>
+            if(null==ticket||&quot;&quot;.equals(ticket)){<br/>
+                ticket = getTicket(cacheManager);       <br/>
+            }<br/>
+            //对所有待签名参数按照字段名的ASCII 码从小到大排序（字典序）后，使用URL键值对的格式（即key1=value1&amp;key2=value2…）拼接成字符串<br/>
+            String s=&quot;jsapi_ticket=&quot;+ticket+&quot;&amp;noncestr=&quot;+noncestr+&quot;&amp;timestamp=&quot;+timestamp+&quot;&amp;url=&quot;+URL;<br/>
+            String signature=&quot;&quot;;<br/>
+            signature=getSha1(s);<br/>
+            map.put(&quot;appid&quot;, appid);<br/>
+            map.put(&quot;timestamp&quot;,timestamp);<br/>
+            map.put(&quot;noncestr&quot;,noncestr);<br/>
+            map.put(&quot;signature&quot;,signature);<br/>
+            return map;   <br/>
+        }<br/><br/>
+        /**<br/>
+         * 对字符串作sha1加密<br/>
+         * @param str<br/>
+         * @return<br/>
+         */<br/>
+        private static String getSha1(String str){<br/>
+            String signature=&quot;&quot;;<br/>
+            try {<br/>
+                MessageDigest messageDigest=MessageDigest.getInstance(&quot;SHA-1&quot;);<br/>
+                messageDigest.reset();<br/>
+                messageDigest.update(str.getBytes(&quot;UTF-8&quot;));<br/>
+                signature=byteToHex(messageDigest.digest());<br/>
+            } catch (NoSuchAlgorithmException e) {<br/>
+                LOG.error(e);<br/>
+            } catch (UnsupportedEncodingException e) {<br/>
+                LOG.error(e);<br/>
+            }<br/>
+            return signature;<br/>
+        }<br/><br/>
+        /**<br/>
+         * byte to String<br/>
+         * @param hash<br/>
+         * @return<br/>
+         */<br/>
+        private static String byteToHex(final byte[] hash) {<br/>
+            Formatter formatter = new Formatter();<br/>
+            for (byte b : hash)<br/>
+            {<br/>
+                formatter.format(&quot;%02x&quot;, b);<br/>
+            }<br/>
+            String result = formatter.toString();<br/>
+            formatter.close();<br/>
+            return result;<br/>
+        }<br/><br/>
+        /**<br/>
+         * 生成签名的时间戳<br/>
+         * @return<br/>
+         */<br/>
+        public static String getTimestamp(){<br/>
+            return Long.toString(System.currentTimeMillis() / 1000);<br/>
+        }<br/>
+        /**<br/>
+         * 生成签名的随机串<br/>
+         * @return<br/>
+         */<br/>
+        public static String getNoncestr(){<br/>
+            return UUID.randomUUID().toString();<br/>
+        }<br/>
+注：；<br/>
+1.在使用过程中的常见错误官方也提供了一些错误的解决方法见说明文档附录5<br/>
+2.在我个人使用时出现最多的是由于签名使用的URL致使无效的签名错误（invalid signature），<br/>
+我个人采用后台获取URL（不带端口号）<br/>
+3.签名成功时，出现无权限调用接口   检测是否在jsApiList中参数是否传入需要调用的接口<br/>
+目前我个人只是使用了JSSDK的部分功能，欢迎各位一起分享交流（QQ：466503166）
+</span>
+</div></body></html> 
